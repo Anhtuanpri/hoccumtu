@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Vở Lật Trang — Sổ từ vựng</title>
+<meta name="description" content="Vở lật trang full màn hình, 2 font (đánh máy & viết tay), lưu localStorage. Bộ định dạng nổi: đổi màu từng chữ & in đậm.">
+<style>
+  :root{
+    --bg:#f2f3f7;
+    --paper:#fffdfa;
+    --ink:#111;
+    --rule:#e7e4db;
+    --accent:#1a73e8;
+    --shadow:rgba(0,0,0,.14);
+    --corner:#eee9dc;
+    --ring:#e0e0e0;
+    --font-type: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial;
+    --font-hand: "Segoe Print","Bradley Hand","Comic Sans MS","Chalkboard SE","Noteworthy","Snell Roundhand",cursive;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--bg); font-family:var(--font-type); color:var(--ink); overflow:hidden}
+
+  .stage{position:fixed; inset:0; display:grid; place-items:center; padding:clamp(8px,2.5vw,24px)}
+  .book{position:relative; width:min(1200px, 100vw); height:100svh; perspective:2200px}
+  .page{
+    position:absolute; inset:0; margin:auto; width:100%; height:100%;
+    background:var(--paper); border-radius:18px;
+    box-shadow:0 24px 40px -16px rgba(0,0,0,.28), 0 6px 18px rgba(0,0,0,.10);
+    overflow:hidden; transform-style:preserve-3d;
+  }
+  .paper{
+    position:absolute; inset:0; padding:28px clamp(18px,2.2vw,30px);
+    overflow:auto; -webkit-overflow-scrolling:touch;
+    font-size: clamp(17px, 1.35vw, 22px); line-height:1.9;
+    background:
+      repeating-linear-gradient(to bottom, transparent 0 28px, var(--rule) 28px 29px),
+      linear-gradient(90deg, rgba(26,115,232,.25), rgba(26,115,232,.25)) left 64px top 0/2px 100% no-repeat,
+      linear-gradient(#fff,#fff);
+  }
+  .paper:focus{outline:none}
+  .paper .ghost{color:#8b8b8b; font-style:italic}
+
+  .flip-layer{position:absolute; inset:0; transform-origin:98% 50%; pointer-events:none}
+  .flip-layer::before, .flip-layer::after{content:""; position:absolute; inset:0; pointer-events:none}
+  .flip-layer::before{
+    background: radial-gradient(120% 140% at 100% 50%, rgba(0,0,0,.22), rgba(0,0,0,0) 60%) right/60% 100% no-repeat,
+                linear-gradient(90deg, rgba(0,0,0,.10), rgba(0,0,0,0));
+    mix-blend-mode:multiply; opacity:0; transition:opacity .25s;
+  }
+  .flip-layer::after{
+    background: linear-gradient(90deg, rgba(255,255,255,.6), rgba(255,255,255,0) 35%),
+                linear-gradient(90deg, rgba(0,0,0,.10), rgba(0,0,0,0) 45%);
+    opacity:0; transition:opacity .25s;
+  }
+  .page.lifting .flip-layer::before,
+  .page.lifting .flip-layer::after{opacity:1}
+
+  .corner{
+    position:absolute; right:0; bottom:0; width:72px; height:72px;
+    background:conic-gradient(from 225deg at 100% 100%, var(--corner), var(--corner) 25%, transparent 0);
+    filter: drop-shadow(-1px -1px 0 rgba(0,0,0,.08));
+    opacity:.9; pointer-events:none;
+  }
+
+  /* chỉ “gờ” 64px ở mép để lật; phần giấy click là để gõ */
+  .zones{position:absolute; inset:0; pointer-events:none}
+  .zones .left, .zones .right{
+    position:absolute; top:0; width:64px; height:100%;
+    pointer-events:auto; cursor:pointer;
+  }
+  .zones .left{left:0; cursor:w-resize}
+  .zones .right{right:0; cursor:e-resize}
+
+  .footer{position:absolute; bottom:10px; left:0; right:0; display:flex; justify-content:center;
+    pointer-events:none; color:#666; text-shadow:0 1px 0 #fff; font-size:.95rem}
+  .footer .pill{background:#fff; border:1px solid #e6e6e6; border-radius:20px; padding:.25rem .7rem; box-shadow:0 4px 10px rgba(0,0,0,.08); pointer-events:auto}
+
+  .gear{
+    position:absolute; top:14px; right:14px; z-index:5;
+    width:46px; height:46px; border-radius:50%;
+    background:#fff; border:1px solid var(--ring); display:grid; place-items:center;
+    box-shadow:0 10px 24px rgba(0,0,0,.20); cursor:pointer; user-select:none;
+  }
+  .gear:hover{border-color:#cfcfcf}
+
+  .panel{
+    position:absolute; top:0; right:0; height:100%; width:min(380px, 92vw);
+    background:rgba(255,255,255,.98); border-left:1px solid #e9e9e9;
+    box-shadow:-18px 0 40px -16px rgba(0,0,0,.25);
+    transform:translateX(100%); transition: transform .28s ease;
+    z-index:6; display:flex; flex-direction:column; backdrop-filter: blur(6px) saturate(1.1);
+  }
+  .panel.open{transform:translateX(0)}
+  .panel header{padding:14px 16px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between}
+  .panel h3{margin:0; font-size:1rem}
+  .panel .close{appearance:none; border:1px solid #e6e6e6; background:#fff; padding:.35rem .6rem; border-radius:10px; cursor:pointer}
+  .panel .sec{padding:14px 16px; border-bottom:1px dashed #eee}
+  .panel .row{display:flex; gap:.5rem; flex-wrap:wrap}
+  .panel button, .panel select, .panel input[type="number"]{
+    appearance:none; border:1px solid #ddd; background:#fff; color:#222;
+    padding:.55rem .7rem; border-radius:.7rem; font-size:.92rem; box-shadow:0 1px 0 #fff inset, 0 1px 2px var(--shadow);
+  }
+  .panel button.primary{border-color:var(--accent); background:var(--accent); color:#fff}
+
+  #toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#111; color:#fff; padding:.65rem .9rem; border-radius:12px; box-shadow:0 10px 24px rgba(0,0,0,.25); z-index:99; font-size:.94rem; opacity:0; transition:opacity .2s}
+
+  /* --- Bubble định dạng nổi --- */
+  .fmt-bubble{
+    position:fixed; z-index:50; background:#fff; border:1px solid #e6e6e6; border-radius:12px;
+    box-shadow:0 10px 30px rgba(0,0,0,.18); padding:.35rem .45rem; display:none; gap:.25rem; align-items:center;
+  }
+  .fmt-bubble button{
+    appearance:none; background:#fff; border:1px solid #e2e2e2; border-radius:8px; padding:.35rem .5rem;
+    font-weight:600; cursor:pointer;
+  }
+  .fmt-bubble .chip{width:22px; height:22px; border-radius:50%; border:1px solid rgba(0,0,0,.1); padding:0}
+  .fmt-bubble .chip[title="Đen"]{background:#000}
+  .fmt-bubble .chip[title="Đỏ"]{background:#d93025}
+  .fmt-bubble .chip[title="Cam"]{background:#f9ab00}
+  .fmt-bubble .chip[title="Xanh lá"]{background:#188038}
+  .fmt-bubble .chip[title="Xanh dương"]{background:#1a73e8}
+  .fmt-bubble .chip[title="Tím"]{background:#a142f4}
+  .fmt-bubble .sep{width:1px; height:20px; background:#eee; margin:0 .25rem}
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="book" id="book">
+      <!-- Gear -->
+      <button class="gear" id="gearBtn" title="Cài đặt & Lưu">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 2.4l.06.06a1.65 1.65 0 0 0 1.82.33h0A1.65 1.65 0 0 0 10.42 1H10.5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0c.23.58.86 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+
+      <!-- Panel -->
+      <aside class="panel" id="panel">
+        <header>
+          <h3>⚙️ Cài đặt & Lưu</h3>
+          <button class="close" id="closePanel">Đóng</button>
+        </header>
+
+        <div class="sec">
+          <strong>Kiểu chữ & cỡ:</strong>
+          <div class="row" style="margin-top:.5rem">
+            <label>Phông:
+              <select id="fontSelect">
+                <option value="type">Đánh máy</option>
+                <option value="hand">Chữ viết tay</option>
+              </select>
+            </label>
+            <label>Cỡ chữ:
+              <input id="fontSize" type="number" min="12" max="40" step="1" value="18" style="width:72px">
+            </label>
+          </div>
+        </div>
+
+        <div class="sec">
+          <strong>Trang & Sổ:</strong>
+          <div class="row" style="margin-top:.5rem">
+            <button id="newPageBtn">+ Trang mới</button>
+            <button id="savePageBtn" class="primary" title="Ctrl/Cmd+S">Lưu trang</button>
+            <button id="saveBookBtn">Lưu sổ</button>
+            <button id="loadBookBtn">Tải sổ</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <strong>Sao lưu:</strong>
+          <div class="row" style="margin-top:.5rem">
+            <button id="exportBtn">Xuất JSON</button>
+            <button id="importBtn">Nhập JSON</button>
+            <button id="resetBtn" title="Xoá sạch sổ (cẩn thận)">Xoá sổ</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <strong>Phím tắt:</strong>
+          <div style="margin-top:.5rem; font-size:.92rem; color:#444">
+            • Lật trang: ← / → hoặc bấm **mép trái/phải**<br>
+            • Lưu trang: Ctrl/Cmd + S &nbsp; • Trang mới: Alt + N
+          </div>
+        </div>
+      </aside>
+
+      <!-- Trang -->
+      <div class="page" id="page">
+        <div class="paper" id="paper" contenteditable="true" spellcheck="false"></div>
+        <div class="flip-layer" id="flipLayer"></div>
+        <div class="corner"></div>
+
+        <!-- gờ lật -->
+        <div class="zones">
+          <div class="left" id="zoneLeft" title="Trang trước"></div>
+          <div class="right" id="zoneRight" title="Trang sau"></div>
+        </div>
+
+        <div class="footer">
+          <div class="pill"><span id="pageInfo">Trang 1 / 1</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bubble định dạng nổi -->
+  <div class="fmt-bubble" id="fmtBubble" role="toolbar" aria-label="Định dạng">
+    <button id="btnBold" title="In đậm (Ctrl/Cmd+B)"><strong>B</strong></button>
+    <div class="sep"></div>
+    <button class="chip" data-color="#000000" title="Đen"></button>
+    <button class="chip" data-color="#d93025" title="Đỏ"></button>
+    <button class="chip" data-color="#f9ab00" title="Cam"></button>
+    <button class="chip" data-color="#188038" title="Xanh lá"></button>
+    <button class="chip" data-color="#1a73e8" title="Xanh dương"></button>
+    <button class="chip" data-color="#a142f4" title="Tím"></button>
+    <div class="sep"></div>
+    <button id="btnClear" title="Bỏ định dạng">✕</button>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+(function(){
+  const KEY='vocab_notebook_v4';
+
+  const pageEl = document.getElementById('page');
+  const paperEl = document.getElementById('paper');
+  const flipLayer = document.getElementById('flipLayer');
+  const pageInfoEl = document.getElementById('pageInfo');
+
+  const gearBtn = document.getElementById('gearBtn');
+  const panel = document.getElementById('panel');
+  const closePanel = document.getElementById('closePanel');
+
+  const newPageBtn = document.getElementById('newPageBtn');
+  const savePageBtn = document.getElementById('savePageBtn');
+  const saveBookBtn = document.getElementById('saveBookBtn');
+  const loadBookBtn = document.getElementById('loadBookBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  const fontSelect = document.getElementById('fontSelect');
+  const fontSize = document.getElementById('fontSize');
+  const zoneLeft = document.getElementById('zoneLeft');
+  const zoneRight = document.getElementById('zoneRight');
+
+  const fmtBubble = document.getElementById('fmtBubble');
+  const btnBold = document.getElementById('btnBold');
+  const btnClear = document.getElementById('btnClear');
+
+  let book = { pages:[blankPage()], current:0, style:{mode:'type', size:18} };
+  const createdNextFor = new Set();
+
+  function blankPage(){
+    return `<div class="ghost">• Gõ từ vựng / ví dụ…<br>• Bôi đen để đổi <strong>màu</strong> / <strong>in đậm</strong> • Ctrl/Cmd+S để lưu trang.</div>`;
+  }
+  function applyStyle(){
+    const m = book.style?.mode || 'type';
+    const size = Number(book.style?.size || 18);
+    paperEl.style.fontFamily = (m==='hand') ? 'var(--font-hand)' : 'var(--font-type)';
+    paperEl.style.fontSize = size+'px';
+    fontSelect.value = m; fontSize.value = size;
+  }
+  function renderPage(){
+    paperEl.innerHTML = book.pages[book.current] ?? blankPage();
+    pageInfoEl.textContent = `Trang ${book.current+1} / ${book.pages.length}`;
+    applyStyle();
+    // focus để gõ ngay
+    setTimeout(()=>{ paperEl.focus(); placeCaretEnd(paperEl); }, 0);
+  }
+  function placeCaretEnd(el){
+    const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+  function clamp(n,min,max){return Math.max(min, Math.min(n,max));}
+  function stripHtml(html){const d=document.createElement('div'); d.innerHTML=html; return d.textContent||d.innerText||'';}
+  function saveCurrentPageToState(){ book.pages[book.current] = paperEl.innerHTML.trim(); }
+  function saveBookToLocal(){ saveCurrentPageToState(); localStorage.setItem(KEY, JSON.stringify(book)); toast('✅ Đã lưu sổ.'); }
+  function loadBookFromLocal(){
+    const raw = localStorage.getItem(KEY);
+    if(!raw){ toast('ℹ️ Chưa có sổ đã lưu.'); return; }
+    try{
+      const data = JSON.parse(raw);
+      if(!Array.isArray(data.pages)) throw 0;
+      book = data; book.current = clamp(book.current,0,book.pages.length-1);
+      renderPage(); toast('📥 Đã tải sổ.');
+    }catch{ toast('⚠️ Dữ liệu hỏng.'); }
+  }
+  function exportJson(){
+    saveCurrentPageToState();
+    const blob = new Blob([JSON.stringify(book,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), {href:url, download:'so-tu-vung.json'});
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+  function importJson(){
+    const inp = Object.assign(document.createElement('input'),{type:'file',accept:'application/json'});
+    inp.onchange = ()=>{
+      const f = inp.files?.[0]; if(!f) return;
+      const r = new FileReader();
+      r.onload = ()=>{
+        try{
+          const data = JSON.parse(String(r.result));
+          if(!Array.isArray(data.pages)) throw 0;
+          book = {
+            pages: data.pages,
+            current: clamp(data.current??0,0,(data.pages.length||1)-1),
+            style: data.style ?? {mode:'type', size:18}
+          };
+          renderPage(); saveBookToLocal(); toast('✅ Đã nhập JSON.');
+        }catch{ toast('⚠️ File JSON không hợp lệ.');}
+      };
+      r.readAsText(f);
+    };
+    inp.click();
+  }
+  function addPage(){
+    saveCurrentPageToState();
+    if(stripHtml(book.pages[book.current]).trim() === stripHtml(blankPage()).trim()){
+      book.pages[book.current] = '';
+      renderPage(); return;
+    }
+    book.pages.splice(book.current+1,0,'');
+    goto(book.current+1,'right');
+  }
+
+  /* --- Realistic flip --- */
+  let flipping=false;
+  function goto(index, dir='right'){
+    saveCurrentPageToState();
+    const next = clamp(index,0,book.pages.length-1);
+    if(next===book.current){ bump(dir); return; }
+    flip(dir, ()=>{ book.current = next; renderPage(); });
+  }
+  function bump(dir){
+    pageEl.classList.add('lifting');
+    animateFlip(dir, 0, 12*(dir==='right'?-1:1), 160, ()=>{ pageEl.classList.remove('lifting'); });
+  }
+  function flip(dir, onHalf){
+    if(flipping) return; flipping=true;
+    pageEl.classList.add('lifting');
+    animateFlip(dir, 0, (dir==='right'? -55:55), 180, ()=>{
+      if(typeof onHalf==='function') onHalf();
+      animateFlip(dir, (dir==='right'? -55:55), 0, 180, ()=>{
+        pageEl.classList.remove('lifting'); flipping=false;
+      });
+    });
+  }
+  function animateFlip(dir, fromDeg, toDeg, dur, done){
+    const start = performance.now();
+    function frame(t){
+      const p = Math.min(1, (t-start)/dur);
+      const ease = p<.5 ? (2*p*p) : (-1+(4-2*p)*p);
+      const deg = fromDeg + (toDeg-fromDeg)*ease;
+      pageEl.style.transformOrigin = (dir==='right'?'98% 50%':'2% 50%');
+      pageEl.style.transform = `rotateY(${deg}deg)`;
+      flipLayer.style.transformOrigin = (dir==='right'?'98% 50%':'2% 50%');
+      flipLayer.style.transform = `rotateY(${deg}deg)`;
+      if(p<1){ requestAnimationFrame(frame); } else {
+        if(toDeg===0){ pageEl.style.transform='none'; flipLayer.style.transform='none'; }
+        done && done();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* --- Events: lật trang ở 2 gờ mép --- */
+  zoneLeft.addEventListener('click', ()=> goto(book.current-1,'left'));
+  zoneRight.addEventListener('click', ()=> goto(book.current+1,'right'));
+
+  document.addEventListener('keydown', (e)=>{
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); saveCurrentPageOnly(); }
+    else if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='b'){ e.preventDefault(); toggleBold(); }
+    else if(e.altKey && e.key.toLowerCase()==='n'){ e.preventDefault(); addPage(); }
+    else if(e.key==='ArrowRight'){ e.preventDefault(); goto(book.current+1,'right'); }
+    else if(e.key==='ArrowLeft'){ e.preventDefault(); goto(book.current-1,'left'); }
+  });
+
+  gearBtn.addEventListener('click', ()=> panel.classList.toggle('open'));
+  closePanel.addEventListener('click', ()=> panel.classList.remove('open'));
+
+  newPageBtn.addEventListener('click', addPage);
+  function saveCurrentPageOnly(){
+    saveCurrentPageToState();
+    localStorage.setItem(KEY, JSON.stringify(book));
+    maybeAutoCreateNextPage();
+    toast(`💾 Đã lưu trang ${book.current+1}.`);
+  }
+  savePageBtn.addEventListener('click', saveCurrentPageOnly);
+  saveBookBtn.addEventListener('click', saveBookToLocal);
+  loadBookBtn.addEventListener('click', loadBookFromLocal);
+  exportBtn.addEventListener('click', exportJson);
+  importBtn.addEventListener('click', importJson);
+  resetBtn.addEventListener('click', ()=>{
+    if(confirm('Xoá toàn bộ sổ? (Không thể hoàn tác)')){
+      localStorage.removeItem(KEY);
+      book = {pages:[blankPage()], current:0, style:{mode:'type', size:18}};
+      createdNextFor.clear?.();
+      renderPage(); toast('🗑️ Đã xoá sổ.');
+    }
+  });
+
+  fontSelect.addEventListener('change', ()=>{ book.style.mode = fontSelect.value; applyStyle(); saveBookToLocal(); });
+  fontSize.addEventListener('change', ()=>{
+    const v = Math.max(12, Math.min(40, Number(fontSize.value)||18));
+    book.style.size = v; applyStyle(); saveBookToLocal();
+  });
+
+  // Auto-save sau 1.2s dừng gõ + auto-tạo-trang-mới (không chuyển)
+  let typingTimer;
+  paperEl.addEventListener('input', ()=>{
+    hideBubble();
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(()=> { saveCurrentPageOnly(); }, 1200);
+  });
+
+  // tiêu chí “gần hết trang” -> tạo thêm 1 trang trống phía sau (chỉ khi ở trang cuối)
+  function maybeAutoCreateNextPage(){
+    const atLastPage = (book.current === book.pages.length - 1);
+    if(!atLastPage) return;
+    if(createdNextFor.has(book.current)) return;
+
+    const remainingPx = paperEl.scrollHeight - paperEl.scrollTop - paperEl.clientHeight;
+    const contentLen = stripHtml(paperEl.innerHTML).length;
+
+    const nearBottom = remainingPx <= 120;
+    const tooLong = contentLen > 1200;
+
+    if(nearBottom || tooLong){
+      book.pages.push('');
+      localStorage.setItem(KEY, JSON.stringify(book));
+      createdNextFor.add(book.current);
+      toast('➕ Đã thêm trang mới phía sau.');
+    }
+  }
+
+  // ====== BUBBLE: chọn & đổi màu / in đậm ======
+  function selectionInPaper(){
+    const sel = window.getSelection();
+    if(!sel || sel.rangeCount===0) return null;
+    const range = sel.getRangeAt(0);
+    // kiểm tra selection nằm trong .paper
+    if(!paperEl.contains(range.startContainer) || !paperEl.contains(range.endContainer)) return null;
+    return {sel, range};
+  }
+
+  function showBubble(){
+    const info = selectionInPaper();
+    if(!info) { hideBubble(); return; }
+    const rect = info.range.getBoundingClientRect();
+    if(rect.width===0 && rect.height===0){ hideBubble(); return; }
+
+    const bubble = fmtBubble;
+    const offset = 8;
+    const x = Math.min(window.innerWidth - bubble.offsetWidth - 8, Math.max(8, rect.left + rect.width/2 - bubble.offsetWidth/2));
+    const y = Math.max(8, rect.top - bubble.offsetHeight - offset);
+
+    bubble.style.left = x + 'px';
+    bubble.style.top = y + 'px';
+    bubble.style.display = 'flex';
+  }
+  function hideBubble(){ fmtBubble.style.display = 'none'; }
+
+  // hiện bubble khi thả chuột / chọn text trong giấy
+  paperEl.addEventListener('mouseup', ()=> setTimeout(showBubble, 0));
+  paperEl.addEventListener('keyup', (e)=>{
+    if(['Shift','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) showBubble();
+  });
+
+  // click 1 từ -> tự mở bubble & bôi cả từ
+  paperEl.addEventListener('click', (e)=>{
+    // đừng kích hoạt ở mép lật
+    const inPaper = e.target.closest('.paper');
+    if(!inPaper) return;
+    const sel = window.getSelection();
+    if(!sel) return;
+    if(sel.rangeCount===0 || !sel.isCollapsed) return; // đã có bôi đen rồi thì giữ nguyên
+    // mở rộng selection ra toàn từ (word)
+    const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY)
+      : (function(){ const rr=document.createRange(); rr.setStart(paperEl,0); rr.collapse(true); return rr; })();
+    if(!r) return;
+    expandRangeToWord(r);
+    sel.removeAllRanges(); sel.addRange(r);
+    showBubble();
+  });
+
+  function isWordChar(ch){
+    return /[A-Za-zÀ-ỹ0-9_’'\-]/.test(ch); // hỗ trợ VN, dấu nháy, gạch nối
+  }
+  function expandRangeToWord(r){
+    const walker = document.createTreeWalker(paperEl, NodeFilter.SHOW_TEXT, null);
+    // đảm bảo r.startContainer là text node
+    if(r.startContainer.nodeType!==Node.TEXT_NODE){
+      // nếu là element, cố gắng đi vào text node gần nhất
+      if(r.startContainer.childNodes.length){
+        r.setStart(r.startContainer.firstChild, 0);
+      }
+    }
+    // tìm text node & index
+    let node = r.startContainer;
+    let index = r.startOffset;
+    if(node.nodeType!==Node.TEXT_NODE) return;
+    const text = node.textContent || '';
+    // mở rộng trái
+    let L=index, R=index;
+    while(L>0 && isWordChar(text[L-1])) L--;
+    while(R<text.length && isWordChar(text[R])) R++;
+    r.setStart(node, L);
+    r.setEnd(node, R);
+  }
+
+  // thao tác định dạng
+  btnBold.addEventListener('click', ()=>{ toggleBold(); saveCurrentPageOnly(); setTimeout(showBubble,0); });
+  btnClear.addEventListener('click', ()=>{ clearFormat(); saveCurrentPageOnly(); hideBubble(); });
+
+  // palette màu
+  fmtBubble.querySelectorAll('.chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const color = btn.getAttribute('data-color');
+      applyColor(color);
+      saveCurrentPageOnly();
+      setTimeout(showBubble,0);
+    });
+  });
+
+  function toggleBold(){
+    // dùng execCommand cho đơn giản (vẫn hoạt động tốt trên iOS/macOS Safari/Chrome)
+    document.execCommand('bold', false, null);
+  }
+
+  function applyColor(color){
+    const info = selectionInPaper();
+    if(!info) return;
+    const {sel, range} = info;
+    if(sel.isCollapsed){
+      // nếu không bôi đen, bỏ qua
+      return;
+    }
+    // chuẩn hoá: bao range bằng <span style="color:...">
+    wrapRangeWithSpan(range, {color});
+  }
+
+  function clearFormat(){
+    const info = selectionInPaper();
+    if(!info) return;
+    const {sel, range} = info;
+    if(sel.isCollapsed) return;
+    // bỏ strong/span color trong selection: thay bằng text thuần
+    const frag = range.cloneContents();
+    // strip style
+    stripStyles(frag);
+    // replace
+    range.deleteContents();
+    range.insertNode(frag);
+    // gộp text nodes liền kề để sạch DOM
+    paperEl.normalize();
+  }
+
+  function stripStyles(root){
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null);
+    const toUnwrap = [];
+    let n;
+    while(n = walker.nextNode()){
+      const tag = n.tagName;
+      if(tag==='SPAN' || tag==='B' || tag==='STRONG' || tag==='FONT'){
+        toUnwrap.push(n);
+      }
+    }
+    toUnwrap.forEach(el=>{
+      // giữ lại màu nếu không muốn? Ở đây là clear nên bỏ
+      while(el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+      el.remove();
+    });
+  }
+
+  function wrapRangeWithSpan(range, styleObj){
+    const span = document.createElement('span');
+    if(styleObj.color) span.style.color = styleObj.color;
+    // nếu range có thể surround trực tiếp:
+    try{
+      range.surroundContents(span);
+    }catch{
+      // fallback: extract & bọc
+      const frag = range.extractContents();
+      span.appendChild(frag);
+      range.insertNode(span);
+    }
+    // giữ selection trên span để chỉnh tiếp
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    const r = document.createRange();
+    r.selectNodeContents(span);
+    sel.addRange(r);
+  }
+
+  // ẩn bubble khi click ngoài giấy
+  document.addEventListener('mousedown', (e)=>{
+    if(!e.target.closest('.fmt-bubble') && !e.target.closest('.paper')) hideBubble();
+  });
+
+  // init
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(raw){ const data = JSON.parse(raw); if(Array.isArray(data.pages)) book = data; }
+  }catch{}
+  if(!Array.isArray(book.pages) || book.pages.length===0){ book.pages=[blankPage()]; book.current=0; }
+  renderPage();
+
+  /* toast helper */
+  let toastTimer;
+  function toast(msg){
+    const el = document.getElementById('toast');
+    el.textContent = msg; clearTimeout(toastTimer);
+    el.style.opacity='1'; toastTimer=setTimeout(()=> el.style.opacity='0', 1600);
+  }
+})();
+</script>
+</body>
+</html>
